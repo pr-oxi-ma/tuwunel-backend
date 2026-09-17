@@ -642,11 +642,23 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                     print(f"[User Dir Filter] Error: {ex}", flush=True)
 
             self.send_response(resp.status)
+            sent_headers = set()
             for k, v in resp.getheaders():
-                if k.lower() not in ('server', 'date', 'transfer-encoding', 'connection', 'content-length'):
+                kl = k.lower()
+                if kl not in ('server', 'date', 'transfer-encoding', 'connection', 'content-length'):
                     self.send_header(k, v)
+                    sent_headers.add(kl)
             self.send_header('Content-Length', str(len(resp_body)))
-            self._send_security_headers()
+            if 'access-control-allow-origin' not in sent_headers:
+                self.send_header('Access-Control-Allow-Origin', '*')
+            if 'access-control-allow-methods' not in sent_headers:
+                self.send_header('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, OPTIONS')
+            if 'access-control-allow-headers' not in sent_headers:
+                self.send_header('Access-Control-Allow-Headers', 'Origin, X-Requested-With, Content-Type, Accept, Authorization')
+            if 'cross-origin-opener-policy' not in sent_headers:
+                self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
+            if 'cross-origin-embedder-policy' not in sent_headers:
+                self.send_header('Cross-Origin-Embedder-Policy', 'credentialless')
             self.end_headers()
 
             self.wfile.write(resp_body)
