@@ -16,7 +16,7 @@ B2_DB_ENDPOINT = os.environ.get("B2_DB_ENDPOINT", "https://s3.us-east-005.backbl
 B2_DB_KEY_ID = os.environ.get("B2_DB_KEY_ID", "005ed6e77ad5dba0000000001")
 B2_DB_APPLICATION_KEY = os.environ.get("B2_DB_APPLICATION_KEY", "K0051WHAwxQnjhuxTIozkWSdJ79RulM")
 B2_DB_BACKUP_KEY = os.environ.get("B2_DB_BACKUP_KEY", "tuwunel-render-db-latest.tar.gz")
-BACKUP_INTERVAL = int(os.environ.get("BACKUP_INTERVAL_SECONDS", 300))  # check every 5 mins
+BACKUP_INTERVAL = int(os.environ.get("BACKUP_INTERVAL_SECONDS", 90))  # check every 90 seconds
 
 LAST_STATE_HASH = None
 LAST_HISTORY_BACKUP_TIME = 0
@@ -159,11 +159,14 @@ def run_daemon():
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--restore":
-        restore_database()
+        ok = restore_database()
+        sys.exit(0 if ok else 1)
     elif len(sys.argv) > 1 and sys.argv[1] == "--backup":
-        backup_database(force=True)
+        ok = backup_database(force=True)
+        sys.exit(0 if ok else 1)
     elif len(sys.argv) > 1 and sys.argv[1] == "--daemon":
         run_daemon()
     else:
         backup_database(force=True)
         run_daemon()
+

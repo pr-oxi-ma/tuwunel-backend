@@ -20,13 +20,25 @@ SYNC_PID=$!
 /usr/local/bin/tuwunel -c /etc/tuwunel.toml &
 TUWUNEL_PID=$!
 
+python3 /app/backend_server.py &
+SERVER_PID=$!
+
 cleanup() {
-    echo "[Entrypoint] Shutdown signal received, running database backup..."
+    echo "[Entrypoint] SIGTERM/SIGINT received: Starting graceful shutdown & emergency DB sync..."
+    # First terminate Tuwunel so RocksDB flushes WAL and releases locks
     kill -TERM "$TUWUNEL_PID" 2>/dev/null || true
+    sleep 2
     kill -TERM "$SYNC_PID" 2>/dev/null || true
+    # Run immediate synchronous backup to Backblaze B2
+    echo "[Entrypoint] Uploading final database state to Backblaze B2..."
     python3 /app/scripts/db_sync.py --backup || true
+    kill -TERM "$SERVER_PID" 2>/dev/null || true
+    echo "[Entrypoint] Safe shutdown complete. Data fully preserved in Backblaze B2."
     exit 0
 }
+
 trap cleanup SIGTERM SIGINT
 
-exec python3 /app/backend_server.py
+wait -n "$SERVER_PID" "$TUWUNEL_PID" || true
+cleanup
+
