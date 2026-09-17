@@ -18,8 +18,8 @@ store_media_on_providers = ["b2_media"]
 allow_local_presence = true
 allow_incoming_presence = true
 allow_outgoing_presence = true
-presence_idle_timeout_s = 15
-presence_offline_timeout_s = 25
+presence_idle_timeout_s = 60
+presence_offline_timeout_s = 120
 
 
 [global.well_known]

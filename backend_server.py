@@ -100,7 +100,10 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
             current["last_active"] = now
             current["explicit_offline"] = False
     else:
-        # Active traffic from user means user is online, clearing any previous offline state
+        # Passive background traffic (like dying sync requests)
+        # must NOT revive a user who was explicitly marked offline!
+        if current.get("explicit_offline") or current.get("presence") == "offline":
+            return
         current["presence"] = "online"
         current["last_active"] = now
         current["explicit_offline"] = False
@@ -113,8 +116,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than 35 seconds -> offline!
-        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 35000:
+        # If user explicitly offline or inactive for more than 75 seconds -> offline!
+        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 75000:
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
@@ -638,6 +641,23 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                     resp_body = json.dumps(ud_data).encode('utf-8')
                 except Exception as ex:
                     print(f"[User Dir Filter] Error: {ex}", flush=True)
+
+            # Sanitize presence events in /sync response to match accurate PRESENCE_STORE
+            if '/sync' in path and resp.status == 200:
+                try:
+                    sync_data = json.loads(resp_body.decode('utf-8'))
+                    if 'presence' in sync_data and 'events' in sync_data['presence']:
+                        for p_evt in sync_data['presence']['events']:
+                            sender = p_evt.get('sender')
+                            if sender and sender in PRESENCE_STORE:
+                                actual_p = get_user_presence(sender)
+                                p_content = p_evt.setdefault('content', {})
+                                p_content['presence'] = actual_p['presence']
+                                p_content['currently_active'] = actual_p['currently_active']
+                                p_content['last_active_ago'] = actual_p['last_active_ago']
+                        resp_body = json.dumps(sync_data).encode('utf-8')
+                except Exception as ex:
+                    print(f"[Sync Presence Sanitize] Error: {ex}", flush=True)
 
             self.send_response(resp.status)
             sent_headers = set()
