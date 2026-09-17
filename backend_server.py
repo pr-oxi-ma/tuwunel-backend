@@ -116,8 +116,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than 50 seconds -> offline!
-        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 50000:
+        # If user explicitly offline or inactive for more than 30 seconds -> offline!
+        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 30000:
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
@@ -654,12 +654,11 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                         sender = p_evt.get('sender')
                         if sender:
                             existing_senders.add(sender)
-                            if sender in PRESENCE_STORE:
-                                actual_p = get_user_presence(sender)
-                                p_content = p_evt.setdefault('content', {})
-                                p_content['presence'] = actual_p['presence']
-                                p_content['currently_active'] = actual_p['currently_active']
-                                p_content['last_active_ago'] = actual_p['last_active_ago']
+                            actual_p = get_user_presence(sender)
+                            p_content = p_evt.setdefault('content', {})
+                            p_content['presence'] = actual_p['presence']
+                            p_content['currently_active'] = actual_p['currently_active']
+                            p_content['last_active_ago'] = actual_p['last_active_ago']
 
                     # Inject tracked users into sync stream so changes propagate instantly without waiting for Tuwunel polling
                     for u_id in PRESENCE_STORE:
