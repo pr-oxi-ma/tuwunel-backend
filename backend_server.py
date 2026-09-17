@@ -116,8 +116,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than 75 seconds -> offline!
-        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 75000:
+        # If user explicitly offline or inactive for more than 50 seconds -> offline!
+        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 50000:
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
@@ -646,16 +646,36 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
             if '/sync' in path and resp.status == 200:
                 try:
                     sync_data = json.loads(resp_body.decode('utf-8'))
-                    if 'presence' in sync_data and 'events' in sync_data['presence']:
-                        for p_evt in sync_data['presence']['events']:
-                            sender = p_evt.get('sender')
-                            if sender and sender in PRESENCE_STORE:
+                    pres_obj = sync_data.setdefault('presence', {})
+                    events_list = pres_obj.setdefault('events', [])
+                    existing_senders = set()
+
+                    for p_evt in events_list:
+                        sender = p_evt.get('sender')
+                        if sender:
+                            existing_senders.add(sender)
+                            if sender in PRESENCE_STORE:
                                 actual_p = get_user_presence(sender)
                                 p_content = p_evt.setdefault('content', {})
                                 p_content['presence'] = actual_p['presence']
                                 p_content['currently_active'] = actual_p['currently_active']
                                 p_content['last_active_ago'] = actual_p['last_active_ago']
-                        resp_body = json.dumps(sync_data).encode('utf-8')
+
+                    # Inject tracked users into sync stream so changes propagate instantly without waiting for Tuwunel polling
+                    for u_id in PRESENCE_STORE:
+                        if u_id not in existing_senders:
+                            actual_p = get_user_presence(u_id)
+                            events_list.append({
+                                "type": "m.presence",
+                                "sender": u_id,
+                                "content": {
+                                    "presence": actual_p["presence"],
+                                    "currently_active": actual_p["currently_active"],
+                                    "last_active_ago": actual_p["last_active_ago"],
+                                }
+                            })
+
+                    resp_body = json.dumps(sync_data).encode('utf-8')
                 except Exception as ex:
                     print(f"[Sync Presence Sanitize] Error: {ex}", flush=True)
 
