@@ -14,6 +14,7 @@ B2_DB_BUCKET = os.environ.get("B2_DB_BUCKET", "conduit-db")
 B2_DB_ENDPOINT = os.environ.get("B2_DB_ENDPOINT", "https://s3.us-east-005.backblazeb2.com")
 B2_DB_KEY_ID = os.environ.get("B2_DB_KEY_ID", "005ed6e77ad5dba0000000001")
 B2_DB_APPLICATION_KEY = os.environ.get("B2_DB_APPLICATION_KEY", "K0051WHAwxQnjhuxTIozkWSdJ79RulM")
+B2_DB_BACKUP_KEY = os.environ.get("B2_DB_BACKUP_KEY", "tuwunel-render-db-latest.tar.gz")
 BACKUP_INTERVAL = int(os.environ.get("BACKUP_INTERVAL_SECONDS", 300))  # default 5 mins
 
 def get_s3_client():
@@ -30,10 +31,10 @@ def restore_database():
         print(f"[DB Sync] Database already exists in {DB_DIR}. Skipping restore.", flush=True)
         return True
 
-    print(f"[DB Sync] Database not found locally. Attempting restore from Backblaze B2 bucket '{B2_DB_BUCKET}'...", flush=True)
+    print(f"[DB Sync] Database not found locally. Attempting restore from Backblaze B2 bucket '{B2_DB_BUCKET}', key '{B2_DB_BACKUP_KEY}'...", flush=True)
     try:
         s3 = get_s3_client()
-        resp = s3.get_object(Bucket=B2_DB_BUCKET, Key="tuwunel-db-latest.tar.gz")
+        resp = s3.get_object(Bucket=B2_DB_BUCKET, Key=B2_DB_BACKUP_KEY)
         tar_bytes = resp["Body"].read()
         os.makedirs(DB_DIR, exist_ok=True)
         with tarfile.open(fileobj=io.BytesIO(tar_bytes), mode="r:gz") as tar:
@@ -79,7 +80,7 @@ def backup_database():
         # 1. Update latest pointer
         s3.put_object(
             Bucket=B2_DB_BUCKET,
-            Key="tuwunel-db-latest.tar.gz",
+            Key=B2_DB_BACKUP_KEY,
             Body=data,
             ContentType="application/gzip",
         )
@@ -88,7 +89,7 @@ def backup_database():
         ts = datetime.datetime.now(datetime.timezone.utc).strftime("%Y%m%d_%H%M%S")
         s3.put_object(
             Bucket=B2_DB_BUCKET,
-            Key=f"backups/tuwunel-db-{ts}.tar.gz",
+            Key=f"backups/tuwunel-render-{ts}.tar.gz",
             Body=data,
             ContentType="application/gzip",
         )
