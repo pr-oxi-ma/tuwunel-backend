@@ -832,7 +832,10 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
 VERCEL_MAILER_URL = os.environ.get("VERCEL_MAILER_URL", "https://ig-mailer.vercel.app/api/send-email")
 VERCEL_MAILER_SECRET = os.environ.get("VERCEL_MAILER_SECRET", "lnCT2j26UCFKY7CeGLkhjVh70lJu0bdO5e5Rxa0za3aMq6ucNmPKU4SKlDaxDf84dpRxvgqUmrW9YKCloXV+Jg==")
 
-ACTIVE_PUBLIC_BASE = os.environ.get("ACTIVE_PUBLIC_BASE", "https://wells-kent-definitely-bidder.trycloudflare.com")
+RENDER_HOST = os.environ.get("RENDER_EXTERNAL_HOSTNAME")
+DEFAULT_BASE = f"https://{RENDER_HOST}" if RENDER_HOST else "https://tuwunel-matrix.onrender.com"
+ACTIVE_PUBLIC_BASE = os.environ.get("ACTIVE_PUBLIC_BASE", DEFAULT_BASE)
+
 
 def forward_to_vercel(to_addr, subject, text_body, html_body):
     clean_addr = to_addr.strip().lower()
