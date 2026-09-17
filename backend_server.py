@@ -83,13 +83,13 @@ MIME_MAP = {
 def update_user_activity(user_id, presence="online", status_msg=None, explicit=False):
     if not user_id:
         return
+    now = time.time()
     current = PRESENCE_STORE.setdefault(user_id, {
         "presence": "online",
         "status_msg": "",
-        "last_active": time.time(),
+        "last_active": now,
         "explicit_offline": False,
     })
-    now = time.time()
     if explicit:
         if presence == "offline":
             current["presence"] = "offline"
@@ -100,12 +100,10 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
             current["last_active"] = now
             current["explicit_offline"] = False
     else:
-        # Background or passive request: do NOT override explicit offline!
-        if current.get("explicit_offline"):
-            return
-        if presence:
-            current["presence"] = presence
+        # Active traffic from user means user is online, clearing any previous offline state
+        current["presence"] = "online"
         current["last_active"] = now
+        current["explicit_offline"] = False
 
     if status_msg is not None:
         current["status_msg"] = status_msg
@@ -115,8 +113,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly set to offline OR inactive for more than 2 minutes -> offline!
-        if info.get("explicit_offline") or info.get("presence") in ("offline", "unavailable") or diff_ms >= 120000:
+        # If user explicitly offline or inactive for more than 35 seconds -> offline!
+        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 35000:
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
