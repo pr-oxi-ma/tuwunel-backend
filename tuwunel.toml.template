@@ -1,0 +1,38 @@
+[global]
+server_name = "{{SERVER_NAME}}"
+database_path = "/var/lib/tuwunel"
+address = ["0.0.0.0"]
+port = {{PORT}}
+max_request_size = 20000000
+allow_registration = true
+yes_i_am_very_very_sure_i_want_an_open_registration_server_prone_to_abuse = true
+allow_federation = true
+new_user_displayname_suffix = ""
+show_all_local_users_in_user_directory = false
+
+# Media storage providers (Backblaze B2 S3 attachments)
+media_storage_providers = ["media", "b2_media"]
+store_media_on_providers = ["b2_media"]
+
+# Presence settings
+allow_local_presence = true
+allow_incoming_presence = true
+allow_outgoing_presence = true
+presence_idle_timeout_s = 60
+presence_offline_timeout_s = 120
+
+[global.well_known]
+client = "https://{{SERVER_NAME}}"
+server = "{{SERVER_NAME}}:443"
+
+[global.smtp]
+connection_uri = "smtp://127.0.0.1:2525"
+sender = "FluffyChat <noreply@fluffychat.chat>"
+require_email_for_registration = true
+
+[global.storage_provider.b2_media.s3]
+endpoint = "https://s3.us-east-005.backblazeb2.com"
+bucket = "conduit-attachments"
+region = "us-east-005"
+key = "005adc4525fe7230000000003"
+secret = "K005Re8uSaR/0UkiM/Di+nuXrFmWDac"
