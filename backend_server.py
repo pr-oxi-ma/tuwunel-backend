@@ -80,6 +80,8 @@ MIME_MAP = {
     '.woff2': 'font/woff2',
 }
 
+INACTIVITY_TIMEOUT_SEC = 85
+
 def update_user_activity(user_id, presence="online", status_msg=None, explicit=False):
     if not user_id:
         return
@@ -100,9 +102,12 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
             current["last_active"] = now
             current["explicit_offline"] = False
     else:
-        # Passive background traffic (like dying sync requests)
-        # must NOT revive a user who was explicitly marked offline!
+        # Passive background traffic (like dying sync requests or background fetches)
+        # must NOT revive a user who was explicitly marked offline OR timed out!
         if current.get("explicit_offline") or current.get("presence") == "offline":
+            return
+        if (now - current.get("last_active", 0)) >= INACTIVITY_TIMEOUT_SEC:
+            # User has timed out; passive background traffic cannot revive them
             return
         current["presence"] = "online"
         current["last_active"] = now
@@ -116,8 +121,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than 30 seconds -> offline!
-        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= 30000:
+        # If user explicitly offline or inactive for more than 85 seconds -> offline!
+        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= (INACTIVITY_TIMEOUT_SEC * 1000):
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
@@ -254,7 +259,9 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                 token = auth[7:].strip()
                 uid = resolve_token_user(token)
                 if uid:
-                    if '/typing/' in path or '/send/' in path or 'set_presence=online' in parsed.query:
+                    if '/logout' in path:
+                        update_user_activity(uid, presence="offline", explicit=True)
+                    elif '/typing/' in path or '/send/' in path or 'set_presence=online' in parsed.query:
                         update_user_activity(uid, presence="online", explicit=True)
                     elif not ('/sync' in path and 'set_presence=offline' in parsed.query):
                         update_user_activity(uid, explicit=False)
