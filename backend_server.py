@@ -312,16 +312,6 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                 self.wfile.write(resp_body)
                 return
 
-            # Intercept Matrix 1.11 / MSC3861 auth_metadata to prevent 404 console logs
-            if path == '/_matrix/client/v1/auth_metadata':
-                resp_body = b'{}'
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(resp_body)))
-                self._send_security_headers()
-                self.end_headers()
-                self.wfile.write(resp_body)
-                return
 
             # Intercept submitCode (verify 6-digit OTP code)
             if self.command == 'POST' and path in (
