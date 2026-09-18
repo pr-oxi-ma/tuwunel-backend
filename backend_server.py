@@ -184,6 +184,14 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
 
+            if path == '/_tuwunel/presence_dump':
+                import json
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json')
+                self.end_headers()
+                self.wfile.write(json.dumps(PRESENCE_STORE).encode('utf-8'))
+                return
+
             # Check for presence update/query URL
             presence_put_match = re.search(r'/_matrix/client/(?:r0|v3)/presence/([^/?]+)/status', path)
 
