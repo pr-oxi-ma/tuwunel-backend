@@ -80,7 +80,7 @@ MIME_MAP = {
     '.woff2': 'font/woff2',
 }
 
-INACTIVITY_TIMEOUT_SEC = 85
+INACTIVITY_TIMEOUT_SEC = 25
 
 def update_user_activity(user_id, presence="online", status_msg=None, explicit=False):
     if not user_id:
@@ -304,6 +304,17 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                     resp_data = {"m.server": server_target}
 
                 resp_body = json.dumps(resp_data).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type', 'application/json; charset=utf-8')
+                self.send_header('Content-Length', str(len(resp_body)))
+                self._send_security_headers()
+                self.end_headers()
+                self.wfile.write(resp_body)
+                return
+
+            # Intercept Matrix 1.11 / MSC3861 auth_metadata to prevent 404 console logs
+            if path == '/_matrix/client/v1/auth_metadata':
+                resp_body = b'{}'
                 self.send_response(200)
                 self.send_header('Content-Type', 'application/json; charset=utf-8')
                 self.send_header('Content-Length', str(len(resp_body)))
