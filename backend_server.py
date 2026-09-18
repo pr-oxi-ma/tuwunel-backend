@@ -90,28 +90,27 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
         "presence": "online",
         "status_msg": "",
         "last_active": now,
-        "explicit_offline": False,
+        "explicit_offline_time": 0,
     })
     if explicit:
         if presence == "offline":
             current["presence"] = "offline"
             current["last_active"] = now - 3600
-            current["explicit_offline"] = True
+            current["explicit_offline_time"] = now
         elif presence in ("online", "unavailable"):
             current["presence"] = presence
             current["last_active"] = now
-            current["explicit_offline"] = False
+            current["explicit_offline_time"] = 0
     else:
         # Passive background traffic (like dying sync requests or background fetches)
-        # must NOT revive a user who was explicitly marked offline OR timed out!
-        if current.get("explicit_offline") or current.get("presence") == "offline":
+        # must NOT revive a user who explicitly closed their tab in the last 4 seconds!
+        offline_time = current.get("explicit_offline_time", 0)
+        if offline_time > 0 and (now - offline_time) < 4.0:
             return
-        if (now - current.get("last_active", 0)) >= INACTIVITY_TIMEOUT_SEC:
-            # User has timed out; passive background traffic cannot revive them
-            return
+
         current["presence"] = "online"
         current["last_active"] = now
-        current["explicit_offline"] = False
+        current["explicit_offline_time"] = 0
 
     if status_msg is not None:
         current["status_msg"] = status_msg
@@ -121,8 +120,8 @@ def get_user_presence(user_id):
     info = PRESENCE_STORE.get(user_id)
     if info:
         diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than 85 seconds -> offline!
-        if info.get("explicit_offline") or info.get("presence") == "offline" or diff_ms >= (INACTIVITY_TIMEOUT_SEC * 1000):
+        # If user explicitly offline or inactive for more than INACTIVITY_TIMEOUT_SEC seconds -> offline!
+        if info.get("presence") == "offline" or diff_ms >= (INACTIVITY_TIMEOUT_SEC * 1000):
             is_online = False
             presence_state = "offline"
         elif info.get("presence") == "unavailable":
@@ -204,12 +203,19 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
             # Intercept PUT or POST presence (navigator.sendBeacon uses POST)
             if self.command in ('PUT', 'POST') and presence_put_match:
                 uid = urllib.parse.unquote(presence_put_match.group(1))
-                try:
-                    data = json.loads(body.decode('utf-8')) if body else {}
-                except Exception:
-                    data = {}
-                p_state = data.get("presence", "online")
-                p_msg = data.get("status_msg", "")
+                p_state = "online"
+                p_msg = ""
+                if body:
+                    try:
+                        data = json.loads(body.decode('utf-8'))
+                        p_state = data.get("presence", "online")
+                        p_msg = data.get("status_msg", "")
+                    except Exception:
+                        b_str = body.decode('utf-8', errors='ignore')
+                        if 'offline' in b_str:
+                            p_state = 'offline'
+                        elif 'online' in b_str:
+                            p_state = 'online'
                 update_user_activity(
                     uid,
                     presence=p_state,
@@ -721,12 +727,9 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                 pass
 
     def do_OPTIONS(self):
-        if self._is_matrix_request():
-            self._proxy_to_conduit()
-        else:
-            self.send_response(204)
-            self._send_security_headers()
-            self.end_headers()
+        self.send_response(204)
+        self._send_security_headers()
+        self.end_headers()
 
     def do_GET(self):
         if self._is_matrix_request():
