@@ -20,7 +20,6 @@ DIRECTORY = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'build', 'w
 CONDUIT_HOST = os.environ.get('CONDUIT_HOST', '127.0.0.1')
 CONDUIT_PORT = int(os.environ.get('CONDUIT_PORT', 6167))
 
-PRESENCE_STORE = {}  # user_id -> {"presence": "online", "status_msg": "", "last_active": timestamp}
 TOKEN_USER_MAP = {}  # access_token -> user_id
 USER_TOKEN_MAP = {}  # user_id -> access_token
 
@@ -80,70 +79,6 @@ MIME_MAP = {
     '.woff2': 'font/woff2',
 }
 
-INACTIVITY_TIMEOUT_SEC = 25
-
-def update_user_activity(user_id, presence="online", status_msg=None, explicit=False):
-    if not user_id:
-        return
-    now = time.time()
-    current = PRESENCE_STORE.setdefault(user_id, {
-        "presence": "online",
-        "status_msg": "",
-        "last_active": now,
-        "explicit_offline_time": 0,
-    })
-    if explicit:
-        if presence == "offline":
-            current["presence"] = "offline"
-            current["last_active"] = now - 3600
-            current["explicit_offline_time"] = now
-        elif presence in ("online", "unavailable"):
-            current["presence"] = presence
-            current["last_active"] = now
-            current["explicit_offline_time"] = 0
-    else:
-        # Passive background traffic (like dying sync requests or background fetches)
-        # must NOT revive a user who explicitly closed their tab in the last 4 seconds!
-        offline_time = current.get("explicit_offline_time", 0)
-        if offline_time > 0 and (now - offline_time) < 4.0:
-            return
-
-        current["presence"] = "online"
-        current["last_active"] = now
-        current["explicit_offline_time"] = 0
-
-    if status_msg is not None:
-        current["status_msg"] = status_msg
-
-def get_user_presence(user_id):
-    now = time.time()
-    info = PRESENCE_STORE.get(user_id)
-    if info:
-        diff_ms = int((now - info.get("last_active", now)) * 1000)
-        # If user explicitly offline or inactive for more than INACTIVITY_TIMEOUT_SEC seconds -> offline!
-        if info.get("presence") == "offline" or diff_ms >= (INACTIVITY_TIMEOUT_SEC * 1000):
-            is_online = False
-            presence_state = "offline"
-        elif info.get("presence") == "unavailable":
-            is_online = False
-            presence_state = "unavailable"
-        else:
-            is_online = True
-            presence_state = "online"
-
-        return {
-            "presence": presence_state,
-            "currently_active": is_online,
-            "last_active_ago": 3600000 if presence_state == "offline" else diff_ms,
-            "status_msg": info.get("status_msg", ""),
-        }
-    return {
-        "presence": "offline",
-        "currently_active": False,
-        "last_active_ago": 3600000,
-        "status_msg": "",
-    }
-
 def resolve_token_user(token):
     if not token:
         return None
@@ -183,101 +118,6 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
 
             parsed = urllib.parse.urlparse(self.path)
             path = parsed.path
-
-            # Check for presence update/query URL
-            presence_put_match = re.search(r'/_matrix/client/(?:r0|v3)/presence/([^/?]+)/status', path)
-
-            # Intercept GET presence to return accurate live presence without Tuwunel's sender_user bug
-            if self.command == 'GET' and presence_put_match:
-                uid = urllib.parse.unquote(presence_put_match.group(1))
-                pres_data = get_user_presence(uid)
-                resp_body = json.dumps(pres_data).encode('utf-8')
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(resp_body)))
-                self._send_security_headers()
-                self.end_headers()
-                self.wfile.write(resp_body)
-                return
-
-            # Intercept PUT or POST presence (navigator.sendBeacon uses POST)
-            if self.command in ('PUT', 'POST') and presence_put_match:
-                uid = urllib.parse.unquote(presence_put_match.group(1))
-                p_state = "online"
-                p_msg = ""
-                if body:
-                    try:
-                        data = json.loads(body.decode('utf-8'))
-                        p_state = data.get("presence", "online")
-                        p_msg = data.get("status_msg", "")
-                    except Exception:
-                        b_str = body.decode('utf-8', errors='ignore')
-                        if 'offline' in b_str:
-                            p_state = 'offline'
-                        elif 'online' in b_str:
-                            p_state = 'online'
-                update_user_activity(
-                    uid,
-                    presence=p_state,
-                    status_msg=p_msg,
-                    explicit=True
-                )
-
-                # Forward directly to Tuwunel so homeserver and /sync receive offline/online instantly
-                query_params = urllib.parse.parse_qs(parsed.query)
-                token = query_params.get('access_token', [None])[0]
-                if not token:
-                    auth = self.headers.get('Authorization', '')
-                    if auth.startswith('Bearer '):
-                        token = auth[7:].strip()
-                if not token:
-                    token = USER_TOKEN_MAP.get(uid)
-
-                if token:
-                    try:
-                        fwd_headers = {
-                            'Authorization': f'Bearer {token}',
-                            'Content-Type': 'application/json',
-                            'Connection': 'close',
-                        }
-                        fwd_body = json.dumps({"presence": p_state, "status_msg": p_msg}).encode('utf-8')
-                        fwd_conn = http.client.HTTPConnection(CONDUIT_HOST, CONDUIT_PORT, timeout=5)
-                        enc_uid = urllib.parse.quote(uid)
-                        fwd_conn.request('PUT', f'/_matrix/client/v3/presence/{enc_uid}/status', body=fwd_body, headers=fwd_headers)
-                        fwd_resp = fwd_conn.getresponse()
-                        fwd_resp.read()
-                        fwd_conn.close()
-                    except Exception:
-                        pass
-
-                resp_body = b'{}'
-                self.send_response(200)
-                self.send_header('Content-Type', 'application/json; charset=utf-8')
-                self.send_header('Content-Length', str(len(resp_body)))
-                self._send_security_headers()
-                self.end_headers()
-                self.wfile.write(resp_body)
-                return
-
-            # Update activity based on Authorization header
-            auth = self.headers.get('Authorization', '')
-            if auth.startswith('Bearer '):
-                token = auth[7:].strip()
-                uid = resolve_token_user(token)
-                if uid:
-                    if '/logout' in path:
-                        update_user_activity(uid, presence="offline", explicit=True)
-                    elif '/typing/' in path or '/send/' in path or 'set_presence=online' in parsed.query:
-                        update_user_activity(uid, presence="online", explicit=True)
-                    elif not ('/sync' in path and 'set_presence=offline' in parsed.query):
-                        update_user_activity(uid, explicit=False)
-
-            # Check for typing update
-            typing_match = re.search(r'/_matrix/client/(?:r0|v3)/rooms/[^/]+/typing/([^/?]+)', path)
-            if typing_match:
-                uid = urllib.parse.unquote(typing_match.group(1))
-                update_user_activity(uid, presence="online", explicit=True)
-
 
             # Intercept well-known to always dynamically return the current URL
             if path in ('/.well-known/matrix/client', '/.well-known/matrix/support', '/.well-known/matrix/server'):
@@ -479,13 +319,6 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                     headers[k] = v
             headers['Host'] = f'{CONDUIT_HOST}:{CONDUIT_PORT}'
 
-            # If GET presence is missing auth, try injecting token from USER_TOKEN_MAP
-            if self.command == 'GET' and presence_put_match and 'Authorization' not in headers:
-                uid = urllib.parse.unquote(presence_put_match.group(1))
-                token = USER_TOKEN_MAP.get(uid)
-                if token:
-                    headers['Authorization'] = f'Bearer {token}'
-
             # Intercept requestToken to track sid -> email and enforce rate limiting (15s cooldown)
             req_email = None
             req_sec = None
@@ -655,42 +488,6 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                     resp_body = json.dumps(ud_data).encode('utf-8')
                 except Exception as ex:
                     print(f"[User Dir Filter] Error: {ex}", flush=True)
-
-            # Sanitize presence events in /sync response to match accurate PRESENCE_STORE
-            if '/sync' in path and resp.status == 200:
-                try:
-                    sync_data = json.loads(resp_body.decode('utf-8'))
-                    pres_obj = sync_data.setdefault('presence', {})
-                    events_list = pres_obj.setdefault('events', [])
-                    existing_senders = set()
-
-                    for p_evt in events_list:
-                        sender = p_evt.get('sender')
-                        if sender:
-                            existing_senders.add(sender)
-                            actual_p = get_user_presence(sender)
-                            p_content = p_evt.setdefault('content', {})
-                            p_content['presence'] = actual_p['presence']
-                            p_content['currently_active'] = actual_p['currently_active']
-                            p_content['last_active_ago'] = actual_p['last_active_ago']
-
-                    # Inject tracked users into sync stream so changes propagate instantly without waiting for Tuwunel polling
-                    for u_id in PRESENCE_STORE:
-                        if u_id not in existing_senders:
-                            actual_p = get_user_presence(u_id)
-                            events_list.append({
-                                "type": "m.presence",
-                                "sender": u_id,
-                                "content": {
-                                    "presence": actual_p["presence"],
-                                    "currently_active": actual_p["currently_active"],
-                                    "last_active_ago": actual_p["last_active_ago"],
-                                }
-                            })
-
-                    resp_body = json.dumps(sync_data).encode('utf-8')
-                except Exception as ex:
-                    print(f"[Sync Presence Sanitize] Error: {ex}", flush=True)
 
             self.send_response(resp.status)
             sent_headers = set()
@@ -1169,5 +966,5 @@ if __name__ == '__main__':
 
     port = int(os.environ.get('PORT', PORT))
     with ThreadingTCPServer(("", port), FastCachedHandler) as httpd:
-        print(f"Serving Web UI with Matrix reverse proxy and Presence engine from {DIRECTORY} on port {port}...")
+        print(f"Serving Web UI with Matrix reverse proxy from {DIRECTORY} on port {port}...")
         httpd.serve_forever()
