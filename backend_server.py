@@ -65,6 +65,7 @@ def save_email_map():
 load_email_map()
 
 PRESENCE_STORE_FILES = [
+    '/var/lib/tuwunel/presence_store.json',
     '/tmp/presence_store.json',
     os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presence_store.json'),
 ]
