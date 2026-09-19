@@ -64,6 +64,36 @@ def save_email_map():
 
 load_email_map()
 
+PRESENCE_STORE_FILES = [
+    '/tmp/presence_store.json',
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), 'presence_store.json'),
+]
+
+def load_presence_store():
+    global PRESENCE_STORE
+    for p in PRESENCE_STORE_FILES:
+        if os.path.exists(p):
+            try:
+                with open(p, 'r') as f:
+                    data = json.load(f)
+                    if isinstance(data, dict):
+                        PRESENCE_STORE.update(data)
+                        print(f"[Presence Store] Loaded {len(data)} records from {p}", flush=True)
+            except Exception as e:
+                print(f"[Presence Store] Error reading {p}: {e}", flush=True)
+
+def save_presence_store():
+    for p in PRESENCE_STORE_FILES:
+        try:
+            d = os.path.dirname(p)
+            if os.path.exists(d):
+                with open(p, 'w') as f:
+                    json.dump(PRESENCE_STORE, f, indent=2)
+        except Exception as e:
+            pass
+
+load_presence_store()
+
 MIME_MAP = {
     '.html': 'text/html; charset=utf-8',
     '.js': 'text/javascript; charset=utf-8',
@@ -96,8 +126,8 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
     if explicit:
         if presence == "offline":
             current["presence"] = "offline"
-            current["last_active"] = now - 3600
             current["explicit_offline_time"] = now
+            # Do NOT corrupt last_active with -3600! Keep real timestamp when user was last active/went offline
         elif presence in ("online", "unavailable"):
             current["presence"] = presence
             current["last_active"] = now
@@ -116,11 +146,14 @@ def update_user_activity(user_id, presence="online", status_msg=None, explicit=F
     if status_msg is not None:
         current["status_msg"] = status_msg
 
+    save_presence_store()
+
 def get_user_presence(user_id):
     now = time.time()
     info = PRESENCE_STORE.get(user_id)
     if info:
-        diff_ms = int((now - info.get("last_active", now)) * 1000)
+        last_active = info.get("last_active", now)
+        diff_ms = max(0, int((now - last_active) * 1000))
         # If user explicitly offline or inactive for more than INACTIVITY_TIMEOUT_SEC seconds -> offline!
         if info.get("presence") == "offline" or diff_ms >= (INACTIVITY_TIMEOUT_SEC * 1000):
             is_online = False
@@ -135,13 +168,12 @@ def get_user_presence(user_id):
         return {
             "presence": presence_state,
             "currently_active": is_online,
-            "last_active_ago": 3600000 if presence_state == "offline" else diff_ms,
+            "last_active_ago": diff_ms,
             "status_msg": info.get("status_msg", ""),
         }
     return {
         "presence": "offline",
         "currently_active": False,
-        "last_active_ago": 3600000,
         "status_msg": "",
     }
 
@@ -681,20 +713,23 @@ class FastCachedHandler(http.server.SimpleHTTPRequestHandler):
                             p_content = p_evt.setdefault('content', {})
                             p_content['presence'] = actual_p['presence']
                             p_content['currently_active'] = actual_p['currently_active']
-                            p_content['last_active_ago'] = actual_p['last_active_ago']
+                            if 'last_active_ago' in actual_p:
+                                p_content['last_active_ago'] = actual_p['last_active_ago']
 
                     # Inject tracked users into sync stream so changes propagate instantly without waiting for Tuwunel polling
                     for u_id in PRESENCE_STORE:
                         if u_id not in existing_senders:
                             actual_p = get_user_presence(u_id)
+                            evt_content = {
+                                "presence": actual_p["presence"],
+                                "currently_active": actual_p["currently_active"],
+                            }
+                            if "last_active_ago" in actual_p:
+                                evt_content["last_active_ago"] = actual_p["last_active_ago"]
                             events_list.append({
                                 "type": "m.presence",
                                 "sender": u_id,
-                                "content": {
-                                    "presence": actual_p["presence"],
-                                    "currently_active": actual_p["currently_active"],
-                                    "last_active_ago": actual_p["last_active_ago"],
-                                }
+                                "content": evt_content,
                             })
 
                     resp_body = json.dumps(sync_data).encode('utf-8')
