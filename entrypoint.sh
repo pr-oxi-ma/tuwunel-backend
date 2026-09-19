@@ -13,6 +13,7 @@ sed -e "s/{{PORT}}/6167/g" \
 echo "[Entrypoint] Starting Tuwunel deployment on host: $HOST_NAME, proxy port: $PORT"
 
 python3 /app/scripts/db_sync.py --restore || echo "[Entrypoint] B2 restore note (continuing)"
+rm -f /var/lib/tuwunel/presence_store.json /tmp/presence_store.json 2>/dev/null || true
 
 python3 /app/scripts/db_sync.py --daemon &
 SYNC_PID=$!

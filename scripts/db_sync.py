@@ -35,7 +35,7 @@ def compute_db_state_hash():
     if not os.path.exists(DB_DIR):
         return None
     try:
-        items = sorted([i for i in os.listdir(DB_DIR) if i != "LOCK" and not i.endswith(".tmp")])
+        items = sorted([i for i in os.listdir(DB_DIR) if i != "LOCK" and not i.endswith(".tmp") and not i.endswith(".json")])
         if not items:
             return None
         parts = []
@@ -92,7 +92,7 @@ def backup_database(force=False):
         print("[DB Sync] Database unchanged. Skipping upload to conserve Backblaze B2 API quota.", flush=True)
         return True
 
-    items = [i for i in os.listdir(DB_DIR) if i != "LOCK" and not i.endswith(".tmp")]
+    items = [i for i in os.listdir(DB_DIR) if i != "LOCK" and not i.endswith(".tmp") and not i.endswith(".json")]
     if not items:
         return False
 
